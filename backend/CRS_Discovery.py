@@ -1,63 +1,23 @@
 import pm4py
 import pandas as pd
-import numpy as np
-import re
-from concurrent.futures import ThreadPoolExecutor
-from math import ceil
 import os
-from multiprocessing import Pool, cpu_count
-from itertools import combinations
-
-
-class LocalNet:
-    def __init__(self, P_L, T_L, F_L, M_L, R_L):
-            self.P_L = frozenset(P_L)  # Places
-            self.T_L = frozenset(T_L)  # Internal transitions
-            self.F_L = frozenset(F_L)  # Flow relations
-            self.M_L = frozenset(M_L)  # Message transitions
-            self.R_L = frozenset(R_L)  # Communication places
-
-    def __hash__(self):
-        return hash((self.P_L, self.T_L, self.F_L, self.M_L, self.R_L))
-    
-    def __eq__(self, other):
-        if not isinstance(other, LocalNet):
-            return False
-        return (self.P_L == other.P_L and 
-                self.T_L == other.T_L and 
-                self.F_L == other.F_L and 
-                self.M_L == other.M_L and 
-                self.R_L == other.R_L)
-    
-class CreEvent:
-    def __init__(self, df, isMsg):
-        self.id = df["event_id"]
-        self.resId = df["res_id"]
-        self.context = df["context"]
-        self.h_ctx = df["h_ctx"] if isMsg else None
-        self.sender = df["sender"] if isMsg else None
-        self.receiver = df["receiver"] if isMsg else None
-
-    def __hash__(self):
-        return hash((self.resId, self.context, self.h_ctx, self.sender, self.receiver))
-
-    
+from multiprocessing import Pool
+  
 
 
 def test_plans():
-    #plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\FP_Log.xes")
-    plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\IP-8_init_log.xes")
-    #plan2 = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\RL-1.xes")
-    plan_update = plan.drop(columns=["time:timestamp"])
-    plan_update.to_csv("IP8_Log.csv", index=False) 
-    # plan_update1 = plan1.drop(columns=["time:timestamp"])
-    # plan_update1.to_csv("output3.csv", index=False) 
-    # plan_update2 = plan2.drop(columns=["time:timestamp"])
-    # plan_update2.to_csv("output4.csv", index=False) 
+    files = os.listdir("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans")
 
-    # pm4py.discovery.discover_petri_net_alpha()
+    for path in files:
+        if path != "bpmn":
+            p = "C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\"
+            p += path
+            plan =  pm4py.read.read_xes(p)
+            plan_update = plan.drop(columns=["time:timestamp"])
+            file_name = path.replace(".xes", ".csv")
+            plan_update.to_csv(file_name, index=False) 
     
-    #print(plan.columns)
+    print(files)
 
 ''' 
 Step 1: Detect the structure of different event logs and enric the logs so that they have following format:
@@ -116,7 +76,7 @@ def modify_Logs(event_log):
             merged_log = add_msg_context(event_log,column_name, "concept:name","org:group")
             merged_log['event_id'] = range(1, len(merged_log) + 1)
 
-            modified_log[["case_id","event_id","res_id","context","h_ctx","sender","receiver"]] = merged_log[['case:concept:name', 'event_id', 'org:group', "concept:name","h_ctx","sender","receiver"]]
+            modified_log[["case_id","event_id","res_id","context","h_ctx","sender","receiver","timestamp"]] = merged_log[['case:concept:name', 'event_id', 'org:group', "concept:name","h_ctx","sender","receiver","time:timestamp"]]
 
         case 2:
         #TODO WICHTIG: Überlge, ob man für message wie m1,m2,m3 die selbe eventID nehmen soll oder für jede eine einzelne, 
@@ -131,7 +91,7 @@ def modify_Logs(event_log):
             
             merged_log = add_msg_context(df_expanded,"Message:Sent", "concept:name","org:resource")
             merged_log['event_id'] = range(1, len(merged_log) + 1)
-            modified_log[["case_id","event_id","res_id","context","h_ctx","sender","receiver"]] = merged_log[['case:concept:name', 'event_id', 'org:resource', "concept:name","h_ctx","sender","receiver"]]
+            modified_log[["case_id","event_id","res_id","context","h_ctx","sender","receiver","timestamp"]] = merged_log[['case:concept:name', 'event_id', 'org:resource', "concept:name","h_ctx","sender","receiver","time:timestamp"]]
         case 3:
             print("TBD")
             event_log['event_id'] = range(1, len(event_log) + 1)
@@ -143,7 +103,7 @@ def modify_Logs(event_log):
 
             print(event_log.columns)
             merged_log = add_msg_context(event_log,"msgInstanceId", "concept:name","org:resource")
-            modified_log[["case_id","event_id","res_id","context","h_ctx","sender","receiver"]] = merged_log[['case:concept:name', 'event_id', 'org:resource', "concept:name","h_ctx","sender","receiver"]]
+            modified_log[["case_id","event_id","res_id","context","h_ctx","sender","receiver","timestamp"]] = merged_log[['case:concept:name', 'event_id', 'org:resource', "concept:name","h_ctx","sender","receiver","time:timestamp"]]
             modified_log.to_excel("IP_Output.xlsx", index=False)
         case _:
             print("Could not categorize log strcuture")
@@ -189,171 +149,173 @@ def local_invocation(log):
                 matching_rows = subframe[subframe["h_ctx"].notnull() & (subframe["receiver"] == sender)]
 
                 if not matching_rows.empty:
+                    A = A["context"]
                     B = matching_rows.iloc[0]["context"]
                     invocation_set.add((A, B))
 
     return invocation_set
 
-def eliminate_duplicates(XL):
-    """
-    Build YL by eliminating duplicates and non-maximal pairs (step 8)
-    Now works with tuples instead of frozensets
-    """
-    YL = set()
-    
-    for (A, B) in XL:
-        # Convert tuples to sets for subset comparison
-        A_set = set(A)
-        B_set = set(B)
-        
-        # Check if there exists a larger pair that contains this one
-        is_maximal = True
-        for (A2, B2) in XL:
-            A2_set = set(A2)
-            B2_set = set(B2)
-            if (A, B) != (A2, B2) and A_set.issubset(A2_set) and B_set.issubset(B2_set):
-                is_maximal = False
-                break
-        
-        if is_maximal:
-            YL.add((A, B))
-    
-    return YL
 
-def build_causal_relations(internal_act, message_trans, grouped_log):
-    XL = set()
-    
-    def directly_follows(a, b, group):
-        for i in range(len(group) - 1):
-            if group.iloc[i]["context"] == a and group.iloc[i + 1]["context"] == b:
-                return True
-        return False
-    
-    def get_subsets(activities):
-        result = []
-        for i in range(1, len(activities) + 1):
-            for combo in combinations(activities, i):
-                result.append(set(combo))
-        return result
-    
-    all_activities = internal_act.union(message_trans)
-    subsets = get_subsets(all_activities)
-    
-    for A in subsets:
-        for B in subsets:
+def mine_local_process(log, resName):
+    print(log)
 
-            if not A or not B:
-                continue
-                
-            if A.issubset(internal_act) and B.issubset(internal_act):
-                valid = True
-                for a in A:
-                    for b in B:
-                        follows = False
-                        for _, group in grouped_log:
-                            if directly_follows(a, b, group):
-                                follows = True
-                                break
-                        if not follows:
-                            valid = False
-                            break
-                    if not valid:
-                        break
-                
-                if valid and len(A) == len(set(A)) and len(B) == len(set(B)):
-                     XL.add((tuple(sorted(A)), tuple(sorted(B))))
-            
-            # Condition 2: Mixed internal and message transitions
-            elif ((A.issubset(internal_act) and B.issubset(message_trans)) or
-                (A.issubset(message_trans) and B.issubset(internal_act))):
-                 XL.add((tuple(sorted(A)), tuple(sorted(B))))
-            
-            # Condition 3: Message transitions
-            elif (A.issubset(message_trans) and B.issubset(message_trans)):
-                 XL.add((tuple(sorted(A)), tuple(sorted(B))))
-    
-    return XL
-
-
-
-def mine_local_process(log):
-    grouped_log = log.groupby(["case_id"])
-    activities = set(grouped_log["context"].apply(list).explode())
-
-    T_I = set(grouped_log.first()["context"])
-    T_O = set(grouped_log.last()["context"])
-
-
-
-    T_L = set()
-    for _, group in grouped_log:
-        T_L.update(
-            group.loc[group["sender"].isna() & group["receiver"].isna(), "context"]
+    #get message transitions and places 
+    M_L = set()
+    for _, group in log.groupby(["case_id"]):
+        M_L.update(
+            map(tuple, group.loc[group["sender"].notna() & group["receiver"].notna(), ["context", "h_ctx"]].values)
         )
+    net, initial_marking, final_marking = pm4py.discovery.discover_petri_net_alpha(log,"context","timestamp","case_id")
+    #pm4py.view_petri_net(net, initial_marking, final_marking, format='svg')
     
-    M_L = activities.difference(T_L)
 
-    helper = log[["context", "h_ctx"]]
-    filtered_messages = helper[helper["context"].isin(list(M_L))].drop_duplicates(subset='context', keep='first')
-    M_L_set = set(filtered_messages.itertuples(index=False, name=None))
-   
+    for arc in net.arcs:
+        if arc.target.name == "end":
+            arc.target.name = f"o_{resName}"
+        elif arc.source.name == "start":
+            arc.source.name = f"i_{resName}"
+
+    ''' 
     Z_L = local_invocation(log)
 
-    X_L = build_causal_relations(T_L, M_L, grouped_log)
-    Y_L = eliminate_duplicates(X_L)
+    #Adding local invocation places
 
-    P_L = {"i_L", "o_L"} 
-    
-    for (A, B) in Y_L:
-        place_name = f"p_{','.join(sorted(A))}_{','.join(sorted(B))}"
-        P_L.add(place_name)
-    
-    # Build communication places (RL)
-    R_L = set()
-    for (A, B) in Z_L:
-        place_name = f"r_{','.join(sorted(A))}_{','.join(sorted(B))}"
-        R_L.add(place_name)
-    
-    # Build flow relations (FL)
-    F_L = set()
-    
-    for act in T_I:
-        F_L.add(("i_L", act))
-    
-    for act in T_O:
-        F_L.add((act, "o_L"))
-    
-    for (A, B) in Y_L:
-        place_name = f"p_{','.join(sorted(A))}_{','.join(sorted(B))}"
-        for a in A:
-            F_L.add((a, place_name))
-        for b in B:
-            F_L.add((place_name, b))
-    
-    for (A, B) in Z_L:
-        place_name = f"r_{','.join(sorted(A))}_{','.join(sorted(B))}"
-        for a in A:
-            F_L.add((a, place_name))
-        for b in B:
-            F_L.add((place_name, b))
-    
-    return LocalNet(P_L, T_L, F_L, M_L_set, R_L)
+    if len(Z_L) > 0:
+        for (A,B) in Z_L:
+            hasArc = False
+            incoming = None
+            outgoing = None
+            for arc in net.arcs:
+                if arc.target.name == f"({{{repr(A)}}}, {{{repr(B)}}})":
+                    hasArc = True
+            if not hasArc:
+                #TODO: Add place and arcs 
+                place = PetriNet.Place(f"({{{repr(A)}}}, {{{repr(B)}}})")
+                for transition in net.transitions:
+                    if transition.name == A:
+                        incoming = transition
+                    elif transition.name == B:
+                        outgoing = transition
+
+                arcIn = PetriNet.Arc(incoming, place)
+                arcOut = PetriNet.Arc(place,outgoing)
+                #Add arcs to place
+                place.in_arcs.add(arcIn)
+                place.out_arcs.add(arcOut)
+                net.places.add(place)
+
+                #add arcs to transitions
+                incoming.out_arcs.add(arcIn)
+                outgoing.in_arcs.add(arcOut)
+
+                #add arcs to petri net
+                net.arcs.add(arcIn)
+                net.arcs.add(arcOut)
+    '''
+
+    pm4py.view_petri_net(net, initial_marking, final_marking, format='svg')
+                
+    print("X")
+    return net, initial_marking, final_marking
+
+from pm4py.objects.petri_net.obj import PetriNet, Marking
 
 
+def create_final_log(LRN, global_log):
+    all_places = set()
+    all_arcs = set()
+    all_transitions = set()
+    transition_dict = dict()
+    all_inits = []
+    all_final = []
+    for key, resource in LRN.items():
+        all_places.update(set(resource["net"].places))
+        all_arcs.update(set(resource["net"].arcs))
+        all_transitions.update(set(resource["net"].transitions))
+        for transition in resource["net"].transitions:
+            transition_dict[transition.name] = transition
+        all_inits.append(resource["initial"])
+        all_final.append(resource["final"])
+    
 
+    for place in global_log.places:
+        if place.name != "start" and place.name != "end":
+            in_arcs = place.in_arcs.copy()
+            out_arcs = place.out_arcs.copy()
+            place.in_arcs.clear()
+            place.out_arcs.clear()
+            for arc in in_arcs:
+                if arc.source.name in transition_dict:
+                    in_arc = PetriNet.Arc(transition_dict[arc.source.name], place)
+                    place.in_arcs.add(in_arc)
+                    transition_dict[arc.source.name].out_arcs.add(in_arc)
+                    all_arcs.add(in_arc)
+            for arc in out_arcs:
+                if arc.target.name in transition_dict:
+                    out_arc = PetriNet.Arc(place, transition_dict[arc.target.name])
+                    place.in_arcs.add(out_arc)
+                    transition_dict[arc.target.name].in_arcs.add(out_arc)
+                    all_arcs.add(out_arc)
+            all_places.add(place)
+            
+
+
+    net = PetriNet("test", all_places, all_transitions, all_arcs)
+    pm4py.view_petri_net(net, all_inits[0], all_final[0], format='svg')
+    return net, all_inits, all_final
+
+def get_global_net(log):
+    column_set = set(log['context'])
+    subsets = {}
+    nets ={}
+    for entry in column_set:
+        subset = log[(log['context'] == entry) | (log['h_ctx'] == entry)]
+        if len(set(subset['context'])) > 1:
+            subsets[entry] = subset
+    
+    for key, sublog in subsets.items():
+      
+        net, initial_marking, final_marking = pm4py.discovery.discover_petri_net_alpha(sublog,"context","timestamp","case_id")
+        #pm4py.view_petri_net(net, initial_marking, final_marking, format='svg')
+        nets[key] = {"net": net, "initial": initial_marking, "final": final_marking}
+    return merge_logs(nets)
+    
+
+def merge_logs(logs):
+    all_places = set()
+    all_arcs = set()
+    all_transitions = set()
+    all_inits = []
+    all_final = []
+    for key, resource in logs.items():
+        all_places.update(set(resource["net"].places))
+        all_arcs.update(set(resource["net"].arcs))
+        all_transitions.update(set(resource["net"].transitions))
+        all_inits.append(resource["initial"])
+        all_final.append(resource["final"])
+    net = PetriNet("messages", all_places, all_transitions, all_arcs)
+    pm4py.view_petri_net(net, format='svg')
+    
+    return net
 
 def dRma_execution(event_log):
     # Step 1: Create Resource Event Log (REL) containing Communciation Ressource Events (CRE): <event_id, res_id, context, h_ctxt, source_uri, dest_uri>
     REL_log = create_REL(event_log)
 
+   
     #Step 2: Partition the REL by the Ressources, create a Sublog for each Ressource, containing all it's events
     sub_Logs = {key: sub_df for key, sub_df in REL_log.groupby("res_id")}
 
-    #TODO: Step 3: Divide the Sub-Logs over computational Nodes (in our case, creating threads) and execute the mine_local_Process for each Sub_Log
+    #Step 3: Divide the Sub-Logs over computational Nodes (in our case, creating threads) and execute the mine_local_Process for each Sub_Log
     LRN = {}
     for key, log in sub_Logs.items():
-        local_net = mine_local_process(log)
-        LRN[key] = local_net
+        net, initial_marking, final_marking= mine_local_process(log, key)
+        LRN[key] = {"res": key, "net": net, "initial": initial_marking, "final": final_marking}
+
+    #Step 4: Global Process
+    global_net = get_global_net(REL_log[REL_log["sender"].notna() & REL_log["receiver"].notna()])
+
+    result = create_final_log(LRN, global_net)
 
     print("x")
 
@@ -361,13 +323,11 @@ def dRma_execution(event_log):
 
 def main():
     # Your main logic goes here
-    
-    plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\AL-1.xes")
-    #plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\FP_Log.xes")
-    #plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\HL.xes")
-    #plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\IP-4_init_log.xes")
-    #plan = pd.read_csv("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\FP_FULL_LOG.csv")
+    plan = pm4py.read.read_xes("C:\\Users\\sofyv\\Documents\\Universität\\WiSe24_25\\Praktikum\\processDiscovery\\backend\\default_discovery_plans\\AL-2.xes")
+
     dRma_execution(plan)
+
+    #pm4py.view_petri_net(net, initial_marking, final_marking, format='svg')
     #test_plans()
 
 # This ensures the script runs only when executed directly
